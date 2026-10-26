@@ -119,7 +119,10 @@ def h5_loction_2_stuff(h5_file, csv_path = None, skip_pointing = False):
                 logging.debug(psr_table)
                 #determine what to title the plot as with a filtered search
                 query, psr_table = qpsr(float(row['RA_deg'].values[0]), float(row['DEC_deg'].values[0]), condition=filterString)
-                param_dict['Title'] = psr_table[0]['BNAME'] if isinstance(psr_table[0]['BNAME'],str) else psr_table[0]['JNAME']               
+                if len(psr_table) > 0:
+                    param_dict['Title'] = psr_table[0]['BNAME'] if isinstance(psr_table[0]['BNAME'],str) else psr_table[0]['JNAME']
+                else: #pulsars in the field, but none at this DM
+                    param_dict['Title'] = "Unknown"
             else:
                 param_dict['Known Nearby Sources'] = str(None)
                 param_dict['Title'] = "Unknown"
