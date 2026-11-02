@@ -69,6 +69,7 @@ def begin_main(values):
                     header=None,
                     comment="#",
                     delim_whitespace=True,
+                    engine="python",
                     names=[
                         "snr",
                         "sample",
@@ -87,7 +88,6 @@ def begin_main(values):
 
     base_work_dir = "/ldata/trunk"
     folder = files.split("/")[-2]
-
     fil_file = glob.glob(f"{base_work_dir}/{folder}/*jb_4096.fil")[0]
     if len(cand_lists) != 0:
         cand_df = pd.concat(cand_lists, ignore_index=True)
@@ -98,8 +98,12 @@ def begin_main(values):
             & (cand_df["dm"] > values.dm)
             & (cand_df["width"] <= values.width)
         )
-
-        fil_obj = pysigproc.SigprocFile(fp=fil_file)
+        try:
+            fil_obj = pysigproc.SigprocFile(fp=fil_file)
+        except AttributeError:
+            logger.warning("Jess output has bad header! Reading from original filterbank.")
+            fil_file = glob.glob(f"{base_work_dir}/{folder}/{folder}.fil")[0]
+            fil_obj = pysigproc.SigprocFile(fp=fil_file)
         mjd = fil_obj.tstart
         if len(cand_df[mask_thresholds]) > 0:
             influx_df = mjd2influx(mjd)
@@ -131,6 +135,9 @@ def begin_main(values):
                 kill_mask = glob.glob(f"{base_work_dir}/{folder}/*.flag")
                 cand_df_masked.loc[:, "fil_file"] = fil_file
                 cand_df_masked.loc[:, "kill_mask"] = kill_mask[0]
+                with open("/ldata/dev_tests/repro/preFetchOUT.txt", "a") as file:
+                    for _, row in cand_df_masked.iterrows():
+                        file.write(f"{str(round(row['dm'])).ljust(6)} pc/cc {str(round(row['width']/(1000),3))} s {row['fil_file']}\n")
                 cand_df_masked.plot(
                     "tcand",
                     "dm",
@@ -195,8 +202,13 @@ def begin_main(values):
                 
                 if label_mask.sum() >= 1:
                     files = results[label_mask]["candidate"]
-                    for file in files:
-                        send2Q("stage03_queue", file)
+                    if values.outfile:
+                        with open(f"{base_work_dir}/{folder}/stage2_results.out", "w+") as outfile:
+                            for file in files:
+                                outfile.write(f"{file}\n")
+                    else:
+                        for file in files:
+                            send2Q("stage03_queue", file)
                 else:
                     delete_cmd = "put delete cmd here"
                     # subprocess.run(cmd.split(), stdout=subprocess.PIPE)
@@ -226,7 +238,7 @@ if __name__ == "__main__":
         default=8.0,
     )
     parser.add_argument(
-        "-w", "--width", type=int, help="log 2 width of the candidates", default=7
+        "-w", "--width", type=int, help="log 2 width of the candidates", default=12
     )
     parser.add_argument(
         "-D", "--dm", type=float, help="minimum DM to look out for", default=20
@@ -238,9 +250,11 @@ if __name__ == "__main__":
         help="minimum number of members in the cluster",
         default=5,
     )
+    parser.add_argument("-o", "--outfile", dest="outfile", action="store_true", help="write filenames to file instead of queuing")
     parser.add_argument("-f", "--files", type=str, help="cand files")
     parser.set_defaults(verbose=False)
     parser.set_defaults(daemon=True)
+    parser.set_defaults(outfile=False)
     values = parser.parse_args()
 
     if values.verbose:
@@ -252,4 +266,5 @@ if __name__ == "__main__":
         logging.info("Running in daemon mode")
         stage_initer(values)
     else:
+        logging.info(f"Running in normal mode on folder {values.files}")
         begin_main(values)

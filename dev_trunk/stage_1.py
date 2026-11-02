@@ -17,7 +17,7 @@ from elasticsearch import Elasticsearch
 from pika.exceptions import *  # StreamLostError, ConnectionResetError
 from scipy.signal import savgol_filter
 
-from dump_all_new import tel_df_to_es
+from dump_all import tel_df_to_es
 from gpu_client import send2gpuQ
 from influx_2df import mjd2influx
 from pika_send import send2Q
@@ -120,24 +120,31 @@ def begin_main(values):
 
         fil_obj = pysigproc.SigprocFile(filterbank)
         freqs = fil_obj.chan_freqs
-        df = mjd2influx(fil_obj.tstart)
-        if df is not None:
-            if len(df) < 33:
-                send_msg_2_slack(f"Pointing info is missing!")
-            all_data_valid = df["DATA_VALID"].sum()
-            if all_data_valid < 33:
-                logging.info("Less than 33s of data is valid, skipping this file")
+        if values.influx:
+            #This entire if-else block checks metadata presence from InfluxDB.
+            #It then indexes the metadata into elasticsearch.
+            #At time of writing, InfluxDB is down so we're going to
+            #ignore it and hope for the best.
+            df = mjd2influx(fil_obj.tstart)
+            if df is not None:
+                if len(df) < 33:
+                    #send_msg_2_slack(f"Pointing info is missing!")
+                    logging.info("Less than 33s of data is valid, skipping this file")
+                    pass
+                all_data_valid = df["DATA_VALID"].sum()
+                if all_data_valid < 33:
+                    logging.info("Less than 33s of data is valid, skipping this file")
+                    _cmdline(f"rm {filterbank}")
+                    return None
+                else:
+                    es=Elasticsearch([{'host':'localhost','port':9200}])
+                    tel_df_to_es(es,df,filterbank)
+            else:
+                logging.warning("No response from InfluxDB.")
+                send_msg_2_slack(f"No info from InfluxDB")
                 _cmdline(f"rm {filterbank}")
                 return None
-            # else:
-            #    es=Elasticsearch([{'host':'localhost','port':9200}])
-            #    tel_df_to_es(es,df,filterbank)
-        else:
-            logging.info("Don't know what's going on!")
-            send_msg_2_slack(f"No info from InfluxDB")
-            _cmdline(f"rm {filterbank}")
-            return None
-        logging.info(f"{100*all_data_valid/len(df)}% data valid")
+            logging.info(f"{100*all_data_valid/len(df)}% data valid")
         bandpass = fil_obj.bandpass
         chan_nos = np.arange(0, bandpass.shape[0])
         # mask = mask_finder(
@@ -147,8 +154,9 @@ def begin_main(values):
 
         # frac_flagged = mask.sum() / 4096
         frac_flagged = 0  # Get the real value from the output of jess
-        es = Elasticsearch([{"host": "localhost", "port": 9200}])
-        tel_df_to_es(es, df, filterbank, frac_flagged)
+        if values.influx:
+            es = Elasticsearch([{"host": "localhost", "port": 9200}])
+            tel_df_to_es(es, df, filterbank, frac_flagged)
 
         # out_chans = []
         # for chans in bad_chans:
@@ -156,13 +164,16 @@ def begin_main(values):
         #     out_chans.append(chans)
         #     out_chans.append(chans)
 
+        #This block moves the filterbank file to a standardized location.
+        #To get this working on other machines, this is probably
+        #the main thing to worry about.
         filterbank_name = filterbank.split("/")[-1].split(".")[0]
         out_dir = "/ldata/trunk/{}/".format(filterbank_name)
         _cmdline("mkdir -p {}".format(out_dir))
         _cmdline(f"mv {filterbank} {out_dir}/")
         new_fil_path = f"{out_dir}{filterbank_name}.fil"
         clean_fil_path = f"{out_dir}{filterbank_name}_jb_4096.fil"
-
+        
         jess_command = (
             "time /sdata/miniconda/envs/py38/bin/python /opt/soft/jess/bin/jess_gauss.py"
             + " -test jarque_bera -spb 4096 -mtz 1.5"
@@ -170,10 +181,13 @@ def begin_main(values):
         )
         logging.info(f"Running {jess_command}")
         send2gpuQ(jess_command)
+        #logging.warn("Skipping jess filtering!")
+        #_cmdline(f"cp {new_fil_path} {clean_fil_path}")
 
         heimdall_command = (
-            "heimdall -nsamps_gulp 524288 -dm 10 10000 -boxcar_max 4096 -cand_sep_dm_trial 200 -cand_sep_time 128 -cand_sep_filter 3"
-            + " -rfi_no_broad"  #  -rfi_no_narrow
+            f"heimdall -nsamps_gulp 524288 -dm 10 10000 -boxcar_max 4096 -cand_sep_dm_trial 200 -cand_sep_time 128 -cand_sep_filter 3"
+            + " -rfi_no_broad"
+            + " -rfi_no_narrow"
             + " -output_dir {}".format(out_dir)
             + " -f {}".format(clean_fil_path)
         )
@@ -186,9 +200,12 @@ def begin_main(values):
 
         p1.join()
         p2.join()
-
+        if values.ret:
+            logging.info(f"Stage 1 output to /ldata/trunk/{filterbank_name}")
+            return f"/ldata/trunk/{filterbank_name}"
         send2Q("stage02_queue", f"/ldata/trunk/{filterbank_name}")
     except IndexError:
+        logging.debug("Index error occurred.")
         pass
     return None
 
@@ -205,6 +222,9 @@ if __name__ == "__main__":
         "-d", "--daemon", dest="daemon", action="store_false", help="Run with AMQP"
     )
     parser.add_argument(
+        "-m", "--skipmetadata", dest="influx", action="store_false", help="Skip metadata indexing."
+    )
+    parser.add_argument(
         "-n", "--nchans", type=int, help="no. of chans to calc. median over", default=64
     )
     parser.add_argument(
@@ -214,9 +234,12 @@ if __name__ == "__main__":
         help="sigma over which values are tagged as RFI",
         default=5,
     )
+    parser.add_argument("-r", "--return", dest="ret", action="store_true", help="Return filename instead of adding to queue")
     parser.add_argument("-f", "--file", type=str, help="Filterbank file")
     parser.set_defaults(verbose=False)
     parser.set_defaults(daemon=True)
+    parser.set_defaults(influx=True)
+    parser.set_defaults(ret=False)
     values = parser.parse_args()
 
     format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -229,4 +252,5 @@ if __name__ == "__main__":
         logging.info("Running in daemon mode")
         stage_initer(values)
     else:
+        logging.info("Running in normal mode")
         begin_main(values)

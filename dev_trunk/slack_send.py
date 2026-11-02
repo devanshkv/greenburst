@@ -34,6 +34,7 @@ def send_img_2_slack(img, nrby=True):
     gb_images = 'C013W4P08MB'
     gb_alerts = 'CPAK5A4G2'
     gb_unknown = 'C08JCLTMNJD'
+    gb_known = 'C0A9QNBMWK0'
     with open("config/conf.yaml", 'r') as stream:
         data_loaded = yaml.load(stream)
     TOKEN = data_loaded['slack']['bot_oauth']
@@ -44,8 +45,10 @@ def send_img_2_slack(img, nrby=True):
                 attachments=attachments)
     response2 = client.chat_postMessage(channel=gb_images, text='',
                 attachments=attachments)
-    if nrby: #old case
-        return f"{response}\n{response2}"
+    if nrby: #known sources
+        response3 = client.chat_postMessage(channel=gb_known, text='',
+                attachments=attachments)
+        return f"{response}\n{response2}\n{response3}"
     else: #no nearby sources
         response3 = client.chat_postMessage(channel=gb_unknown, text='',
                 attachments=attachments)
