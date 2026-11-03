@@ -33,23 +33,24 @@ def mjd2influx(mjd):
         return None
 
 def interpolate_value(mjd, df, key):
-    if key == "RA_deg":
-        spl = UnivariateSpline(df['MJD'], y=df[key]-180.0)
-        interpolated_ra =  spl(mjd)
-        if interpolated_ra + 180 > 360:
-            return interpolated_ra
-        else:
-            return interpolated_ra + 180
+    if key in ("RA_deg", "GL_deg"):
+        # Unwrapped, so the spline doesn't swing between 0 and 360 where the pointing crosses 0
+        unwrapped = np.degrees(np.unwrap(np.radians(df[key].values.astype(float))))
+        spl = UnivariateSpline(df['MJD'], y=unwrapped)
+        return spl(mjd) % 360
     spl = UnivariateSpline(df['MJD'], y=df[key])
     return spl(mjd)
-    
+
 def get_both_dms(gl, gb):
     ne2001_cmd = f'NE2001 {gl} {gb} 25 -1'
     ymw16_cmd = f'ymw16 Gal {gl} {gb} 25000 2'
     ne2001_output = subprocess.run(ne2001_cmd.split(), stdout=subprocess.PIPE).stdout
     ymw16_output = subprocess.run(ymw16_cmd.split(), stdout=subprocess.PIPE).stdout
-    nout=float(ne2001_output.split()[0])
-    yout=float(ymw16_output.split(b'DM:')[1].split()[0])
+    try:
+        nout=float(ne2001_output.split()[0])
+        yout=float(ymw16_output.split(b'DM:')[1].split()[0])
+    except (IndexError, ValueError):
+        raise ValueError(f'No DM in the output of {ne2001_cmd} ({ne2001_output!r}) or {ymw16_cmd} ({ymw16_output!r})')
     return nout, yout
 """
 Index(['ATAZIND', 'ATELIND', 'ATMFBS', 'ATMTLS', 'ATRXOCTA', 'AZCORR', 'AZMJD',
