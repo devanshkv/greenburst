@@ -81,12 +81,23 @@ def extend_df(influx_df, cand_df, tsec = 3):
         logging.info('No influx data was found')
         return cand_df
 
+    # Runs of consecutive valid rows. A candidate is valid when the rows within tsec of it and the rows either
+    # side of it are valid; its pointing is interpolated over its run, which is the whole window when every
+    # row is valid (as before), so a candidate in a gap in the Influx data still gets a position.
+    valid = influx_df['DATA_VALID'] == 1
+    run = (valid != valid.shift()).cumsum()
     for index, row in cand_df.iterrows():
-        mask = (row['cand_mjd'] - (tsec/(60*60*24)) <  influx_df['MJD']) | (influx_df['MJD'] < row['cand_mjd'] + (tsec/(60*60*24)))
-        if influx_df['DATA_VALID'][mask].sum() != len(influx_df[mask]):
+        near = (row['cand_mjd'] - (tsec/(60*60*24)) <  influx_df['MJD']) & (influx_df['MJD'] < row['cand_mjd'] + (tsec/(60*60*24)))
+        before = np.flatnonzero(influx_df['MJD'].values <= row['cand_mjd'])
+        after = np.flatnonzero(influx_df['MJD'].values > row['cand_mjd'])
+        sides = ([before[-1]] if len(before) else []) + ([after[0]] if len(after) else [])
+        mask = run == run.iloc[sides[0]] if sides else valid & False
+        if not valid[near].all() or not valid.iloc[sides].all() or mask.sum() < 2:
             cand_df.loc[index,'cand_valid'] = 0
         else:
-            cand_df.loc[index,'cand_gl'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'GL_deg') 
+            if not near.any():
+                near = np.isin(np.arange(len(influx_df)), sides)
+            cand_df.loc[index,'cand_gl'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'GL_deg')
             cand_df.loc[index,'cand_gb'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'GB_deg')
             ne2001_dm, ymw16_dm = get_both_dms(cand_df.loc[index,'cand_gl'], cand_df.loc[index,'cand_gb'])
             cand_df.loc[index,'cand_ne2001'] = ne2001_dm
@@ -104,10 +115,11 @@ def extend_df(influx_df, cand_df, tsec = 3):
             cand_df.loc[index,'DEC_deg'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'DEC_deg')
             cand_df.loc[index,'RA_drift'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'RA_drift')
             cand_df.loc[index,'DEC_drift'] = interpolate_value(row['cand_mjd'], influx_df[mask], 'DEC_drift')
-            cand_df.loc[index,'SCPROJID'] = ''.join(set(influx_df['SCPROJID'][mask]))
+            # From the rows at the candidate, so a file that spans a project change gets one name, not both joined
+            cand_df.loc[index,'SCPROJID'] = ''.join(set(influx_df['SCPROJID'][near]))
             cand_df.loc[index,'WEBCNTRL'] = 1
-            cand_df.loc[index,'IFV1TNCI'] = ''.join(set(influx_df['IFV1TNCI'][mask]))
-            cand_df.loc[index,'ATRXOCTA'] = list(set(influx_df['ATRXOCTA'][mask]))[0]
+            cand_df.loc[index,'IFV1TNCI'] = ''.join(set(influx_df['IFV1TNCI'][near]))
+            cand_df.loc[index,'ATRXOCTA'] = list(set(influx_df['ATRXOCTA'][near]))[0]
     return cand_df
 
 if __name__ == "__main__":
