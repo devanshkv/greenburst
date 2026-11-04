@@ -60,8 +60,8 @@ def no_dm_models(monkeypatch):
 
 
 def unpatched_extend_df():
-    """extend_df as it was before this fix, from git."""
-    src = subprocess.run(["git", "show", "origin/greenburst:dev_trunk/influx_2df.py"], cwd=DEV_TRUNK,
+    """extend_df as it was before this fix, from git (4c312b8, the code deployed until the fix)."""
+    src = subprocess.run(["git", "show", "4c312b8:dev_trunk/influx_2df.py"], cwd=DEV_TRUNK,
                          stdout=subprocess.PIPE, check=True).stdout.decode()
     mod = types.ModuleType("influx_2df_unpatched")
     exec(compile(src, "influx_2df_unpatched", "exec"), mod.__dict__)
