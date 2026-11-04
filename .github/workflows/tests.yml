@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+    branches: [greenburst]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Python, numpy, pandas, scipy and matplotlib as in production's tfgpu environment on greenburst
+    container: python:3.6.15-bullseye
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # some tests compare against the code at earlier commits
+
+      - name: Install
+        run: pip install numpy==1.18.1 pandas==0.24.2 scipy==1.2.1 matplotlib==3.0.1 pytest==6.2.5
+
+      - name: Compile
+        run: python -m compileall -q dev_trunk
+
+      - name: Tests
+        working-directory: dev_trunk
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -d tests ]; then
+            python -m pytest -p no:cacheprovider tests
+          else
+            echo "No tests in dev_trunk/tests yet"
+          fi
