@@ -11,7 +11,7 @@ from astropy.time import Time
 from elasticsearch import Elasticsearch
 import pylab as plt
 
-def tel_df_to_es(es,influx_df,filterbank):
+def tel_df_to_es(es,influx_df,filterbank, frac_flagged):
     data_validity_mask = influx_df['DATA_VALID']==1
     time_mask = 3600*24*(influx_df['MJD'] - influx_df['MJD'][0]) < 503.31
     total_influx_mask = data_validity_mask & time_mask
@@ -38,6 +38,7 @@ def tel_df_to_es(es,influx_df,filterbank):
                 dump_dict['Receiver'] = _df['IFV1TNCI'][0]
                 dump_dict['Project_ID'] = _df['SCPROJID'][0]
                 dump_dict['Time_spent'] = time_spent
+                dump_dict['Fraction_flagged'] = frac_flagged
                 result = es.index(index='greenburst',doc_type='_doc',id=time.isot,body=json.dumps(dump_dict))
                 logging.info(result)
 

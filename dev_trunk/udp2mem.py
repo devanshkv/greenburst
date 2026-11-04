@@ -9,7 +9,7 @@ import socket
 import numpy as np
 import numba
 import struct
-import filutils as fu
+#import filutils as fu
 import time
 import pysigproc
 from astropy.time import Time
@@ -235,12 +235,12 @@ if __name__ == "__main__":
     wait=True
     producer_thread = threading.Thread(name='udp2buf',target=producer,args=(wait,))
     consumer_thread = threading.Thread(name='buf2spec',target=consumer,args=(wait,Q,Q2,))
-    filwrite_therad = threading.Thread(name='spec2fil',target=filwriter,args=(Q,Q2,Qinit,))
-    heiminit_thread = threading.Thread(name='heiminit',target=init_stage1,args=(Qinit,))
+    #filwrite_therad = threading.Thread(name='spec2fil',target=filwriter,args=(Q,Q2,Qinit,))
+    #heiminit_thread = threading.Thread(name='heiminit',target=init_stage1,args=(Qinit,))
     
     producer_thread.start()
     consumer_thread.start()
     time.sleep(24)
     filwrite_therad.start()
-    #time.sleep(8*60)
-    #heiminit_thread.start()
+    time.sleep(8*60)
+    heiminit_thread.start()
